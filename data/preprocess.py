@@ -22,7 +22,19 @@ def getStable(data, w=1440):
     return data[w // 2:-w // 2, :], stable[w // 2:-w // 2, :]
 
 
+def getDiscreteChannels(dataset):
+    """返回需要移除的离散通道索引"""
+    if dataset == "MSL":
+        return list(range(1, 55))
+    elif dataset == "SMAP":
+        return list(range(1, 25))
+    elif dataset == "SWAT":
+        return [2, 4, 9, 10, 11, 13, 15, 19, 20, 21, 22, 29, 30, 31, 32, 33, 42, 43, 48, 50]
+    return None
+
+
 def getData(path='./dataset/', dataset='SWaT', period=1440, train_rate=0.9):
+    # 加载数据
     init_data = np.load(path + dataset + '/' + dataset + '_train_data.npy')
     init_time = getTimeEmbedding(np.load(path + dataset + '/' + dataset + '_train_date.npy'))
 
@@ -30,16 +42,26 @@ def getData(path='./dataset/', dataset='SWaT', period=1440, train_rate=0.9):
     test_time = getTimeEmbedding(np.load(path + dataset + '/' + dataset + '_test_date.npy'))
     test_label = np.load(path + dataset + '/' + dataset + '_test_label.npy')
 
+    # 移除离散通道
+    discrete_channels = getDiscreteChannels(dataset)
+    if discrete_channels is not None:
+        print(f"Removing {len(discrete_channels)} discrete channels from {dataset} dataset")
+        init_data = np.delete(init_data, discrete_channels, axis=1)
+        test_data = np.delete(test_data, discrete_channels, axis=1)
+
+    # 标准化（只针对连续变量）
     scaler = StandardScaler()
     scaler.fit(init_data)
     init_data = pd.DataFrame(scaler.transform(init_data)).fillna(0).values
     test_data = pd.DataFrame(scaler.transform(test_data)).fillna(0).values
 
+    # 提取稳定和趋势成分
     init_data, init_stable = getStable(init_data, w=period)
     init_time = init_time[period // 2:-period // 2, :]
     init_label = np.zeros((len(init_data), 1))
     test_stable = np.zeros_like(test_data)
 
+    # 数据分割
     train_data = init_data[:int(train_rate * len(init_data)), :]
     train_time = init_time[:int(train_rate * len(init_time)), :]
     train_stable = init_stable[:int(train_rate * len(init_stable)), :]

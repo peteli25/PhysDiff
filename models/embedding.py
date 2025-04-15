@@ -48,6 +48,15 @@ class DataEmbedding(nn.Module):
         nn.init.kaiming_normal_(self.conv.weight, mode="fan_in", nonlinearity="leaky_relu")
 
     def forward(self, x):
+        original_shape = x.shape
+        if x.dim() > 3:
+            print(f"Warning: DataEmbedding received {x.dim()}D input with shape {original_shape}")
+            batch_size = original_shape[0]
+            if original_shape[1] == original_shape[2] == original_shape[3]:
+                x = x.view(batch_size, original_shape[1], -1)
+            else:
+                x = x.view(batch_size, -1, original_shape[-1])
+            print(f"Reshaped to {x.shape}")
+        
         x = self.conv(x.permute(0, 2, 1)).permute(0, 2, 1)
-
         return x

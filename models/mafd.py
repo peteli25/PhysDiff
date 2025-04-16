@@ -373,14 +373,9 @@ class MAFD:
         """
         return torch.conj(self._e_a(a, t).matmul((G.conj().T * W))) / G.shape[1]
     
-    def nextDecomp(self, aspe_weights=None):
+    def nextDecomp(self):
         """
-        Next decomposition level with ASPE weights integration
-        
-        Parameters:
-        -----------
-        aspe_weights : torch.Tensor or float, optional
-            Weights derived from ASPE to guide decomposition
+        Next decomposition level
         """
         N_ch, _ = self.G.shape
         self.level += 1
@@ -401,16 +396,6 @@ class MAFD:
                 # Element-wise multiplication in frequency domain
                 S1_tmp = torch.abs(torch.fft.ifft(fft_remainder_repeated * Base, self.t.shape[1], dim=1))
                 S1_tmp = S1_tmp.T
-                
-                # Apply ASPE weights if provided
-                if aspe_weights is not None:
-                    if isinstance(aspe_weights, torch.Tensor):
-                        weights_reshaped = torch.ones_like(S1_tmp)
-                        for i in range(min(S1_tmp.shape[1], aspe_weights.shape[0])):
-                            weights_reshaped[:, i] = aspe_weights[i]
-                        S1_tmp = S1_tmp * weights_reshaped
-                    elif isinstance(aspe_weights, float):
-                        S1_tmp = S1_tmp * aspe_weights
                 
                 if S1_tmp_sum is None:
                     S1_tmp_sum = S1_tmp.clone()
@@ -441,9 +426,9 @@ class MAFD:
                     
                     # Basis component
                     tem_B = (torch.sqrt(1-torch.abs(an)**2) / (1-torch.conj(an) * torch.exp(self.t[[i_ch], :] * 1j))) * \
-                        ((torch.exp(1j * self.t[[i_ch], :]) - self.an[i_ch][self.level-1]) / \
-                        (torch.sqrt(1 - torch.abs(self.an[i_ch][self.level-1])**2))) * \
-                        self.tem_B[i_ch][self.level-1]
+                           ((torch.exp(1j * self.t[[i_ch], :]) - self.an[i_ch][self.level-1]) / \
+                           (torch.sqrt(1 - torch.abs(self.an[i_ch][self.level-1])**2))) * \
+                           self.tem_B[i_ch][self.level-1]
                     self.tem_B[i_ch].append(tem_B)
                     
                     # Decomposition component
@@ -452,8 +437,8 @@ class MAFD:
                     
                     # Remainder
                     remainder = (self.remainder[i_ch][self.level] - coef * self._e_a(an, self.t[[i_ch], :])) * \
-                            (1 - torch.conj(an) * torch.exp(1j * self.t[[i_ch], :])) / \
-                            (torch.exp(1j * self.t[[i_ch], :]) - an)
+                               (1 - torch.conj(an) * torch.exp(1j * self.t[[i_ch], :])) / \
+                               (torch.exp(1j * self.t[[i_ch], :]) - an)
                     self.remainder[i_ch].append(remainder)
                 else:
                     # For other channels, use the same an and max_loc as channel 0
@@ -467,9 +452,9 @@ class MAFD:
                     
                     # Basis component
                     tem_B = (torch.sqrt(1-torch.abs(self.an[0][-1])**2) / (1-torch.conj(self.an[0][-1]) * torch.exp(self.t[[i_ch], :] * 1j))) * \
-                        ((torch.exp(1j * self.t[[i_ch], :]) - self.an[i_ch][self.level-1]) / \
-                        (torch.sqrt(1 - torch.abs(self.an[i_ch][self.level-1])**2))) * \
-                        self.tem_B[i_ch][self.level-1]
+                           ((torch.exp(1j * self.t[[i_ch], :]) - self.an[i_ch][self.level-1]) / \
+                           (torch.sqrt(1 - torch.abs(self.an[i_ch][self.level-1])**2))) * \
+                           self.tem_B[i_ch][self.level-1]
                     self.tem_B[i_ch].append(tem_B)
                     
                     # Decomposition component
@@ -478,8 +463,8 @@ class MAFD:
                     
                     # Remainder
                     remainder = (self.remainder[i_ch][self.level] - coef * self._e_a(self.an[0][-1], self.t[[i_ch], :])) * \
-                            (1 - torch.conj(self.an[0][-1]) * torch.exp(1j * self.t[[i_ch], :])) / \
-                            (torch.exp(1j * self.t[[i_ch], :]) - self.an[0][-1])
+                               (1 - torch.conj(self.an[0][-1]) * torch.exp(1j * self.t[[i_ch], :])) / \
+                               (torch.exp(1j * self.t[[i_ch], :]) - self.an[0][-1])
                     self.remainder[i_ch].append(remainder)
         else:
             raise ValueError('This implementation only supports decompMethod=4 (Multi-channel Fast AFD)')

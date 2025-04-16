@@ -49,7 +49,6 @@ if __name__ == '__main__':
     # MAFD parameters
     parser.add_argument('--mafd_components', type=int, default=8, help='number of MAFD components')
     parser.add_argument('--lambda_aspe', type=float, default=0.2, help='weight for ASPE loss')
-    parser.add_argument('--handle_discrete', type=bool, default=True, help='whether to handle discrete channels specially')
     
     # Additional parameters
     parser.add_argument('--p', type=float, default=10.0, help='disturbance magnitude')

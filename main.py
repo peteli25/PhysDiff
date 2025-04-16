@@ -21,7 +21,7 @@ if __name__ == '__main__':
     parser.add_argument('--model_dir', type=str, default='./checkpoint/', help='path for checkpoints')
     
     # Training parameters
-    parser.add_argument('--itr', type=int, default=1, help='number of iterations for evaluation')
+    parser.add_argument('--itr', type=int, default=5, help='number of iterations for evaluation')
     parser.add_argument('--epochs', type=int, default=10, help='training epochs')
     parser.add_argument('--patience', type=int, default=3, help='early stopping patience')
     parser.add_argument('--batch_size', type=int, default=8, help='batch size')
@@ -48,7 +48,7 @@ if __name__ == '__main__':
     
     # MAFD parameters
     parser.add_argument('--mafd_components', type=int, default=8, help='number of MAFD components')
-    parser.add_argument('--lambda_aspe', type=float, default=0.2, help='weight for ASPE loss')
+    parser.add_argument('--lambda_aspe', type=float, default=0.1, help='weight for ASPE loss')
     
     # Additional parameters
     parser.add_argument('--p', type=float, default=10.0, help='disturbance magnitude')

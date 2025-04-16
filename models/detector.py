@@ -11,6 +11,88 @@ from models.diffusion import Diffusion
 from models.embedding import DataEmbedding, PositionEmbedding, TimeEmbedding
 
 
+class FrequencyMemoryBank:
+    def __init__(self, max_size=1000, feature_dim=64, seq_len=64, device=None):
+        if device is None:
+            self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+        else:
+            self.device = torch.device(device)
+            
+        self.max_size = max_size
+        self.feature_dim = feature_dim
+        self.seq_len = seq_len
+        
+        # Initialize memory banks
+        self.high_freq_bank = torch.zeros((max_size, feature_dim, seq_len), device=self.device)
+        self.low_freq_bank = torch.zeros((max_size, feature_dim, seq_len), device=self.device)
+        self.complexity_bank = torch.zeros(max_size, device=self.device)
+        
+        # Memory management variables
+        self.pointer = 0
+        self.size = 0
+        self.is_initialized = False
+        
+    def update(self, high_freq, low_freq, complexity):
+        batch_size = high_freq.shape[0]
+        
+        # Number of samples to update (limit to avoid excessive computation)
+        num_update = min(batch_size, max(1, self.max_size // 20))
+        
+        # Randomly select samples to update
+        indices = torch.randperm(batch_size)[:num_update]
+        
+        for i in indices:
+            # Get memory slot index with circular buffer strategy
+            idx = self.pointer % self.max_size
+            
+            # Store frequency components
+            try:
+                # Handle different dimensions
+                if high_freq[i].dim() == 3:  # [channels, features, seq_len]
+                    self.high_freq_bank[idx] = high_freq[i].mean(dim=0)
+                    self.low_freq_bank[idx] = low_freq[i].mean(dim=0)
+                elif high_freq[i].dim() == 2:  # [features, seq_len]
+                    self.high_freq_bank[idx] = high_freq[i]
+                    self.low_freq_bank[idx] = low_freq[i]
+                else:
+                    # Reshape to compatible format
+                    self.high_freq_bank[idx] = high_freq[i].reshape(self.feature_dim, self.seq_len)
+                    self.low_freq_bank[idx] = low_freq[i].reshape(self.feature_dim, self.seq_len)
+                    
+                # Store complexity
+                if isinstance(complexity, torch.Tensor) and complexity.numel() > 1:
+                    self.complexity_bank[idx] = complexity[i] if i < complexity.numel() else complexity.mean()
+                else:
+                    self.complexity_bank[idx] = complexity
+                    
+                # Update pointer and size
+                self.pointer += 1
+                if self.size < self.max_size:
+                    self.size += 1
+                    
+                # Mark as initialized
+                self.is_initialized = True
+            except Exception as e:
+                print(f"Failed to update memory bank: {str(e)}")
+        
+    def sample(self, batch_size):
+        # If no data in memory bank, return None
+        if not self.is_initialized or self.size == 0:
+            return None, None, 0.5
+        
+        # Randomly sample indices from memory bank (with replacement)
+        indices = torch.randint(0, self.size, (batch_size,), device=self.device)
+        
+        # Get sampled frequency components
+        sampled_high_freq = self.high_freq_bank[indices]
+        sampled_low_freq = self.low_freq_bank[indices]
+        
+        # Get average complexity
+        avg_complexity = self.complexity_bank[indices].mean().item()
+        
+        return sampled_high_freq, sampled_low_freq, avg_complexity
+
+
 class PhysicalFeatureExtractor(nn.Module):
     """
     Extracts physical features from time series data using MAFD decomposition
@@ -161,9 +243,6 @@ class PhysicalFeatureExtractor(nn.Module):
 
 
 class RoutingAttention(nn.Module):
-    """
-    Routing attention mechanism for physically-guided diffusion
-    """
     def __init__(self, model_dim, atten_dim, head_num, dropout, residual=True):
         super(RoutingAttention, self).__init__()
         self.atten_dim = atten_dim
@@ -180,14 +259,20 @@ class RoutingAttention(nn.Module):
         self.W_Ph_high = nn.Linear(model_dim, self.atten_dim * self.head_num, bias=True)
         self.W_Ph_low = nn.Linear(model_dim, self.atten_dim * self.head_num, bias=True)
         
+        # Cross-attention projections
+        self.W_Cross_Q = nn.Linear(model_dim, self.atten_dim * self.head_num, bias=True)
+        self.W_Cross_K = nn.Linear(model_dim, self.atten_dim * self.head_num, bias=True)
+        
+        # Adaptive routing weights
+        self.route_high = nn.Parameter(torch.ones(1, head_num, 1, 1))
+        self.route_low = nn.Parameter(torch.ones(1, head_num, 1, 1))
+        
+        # Output projection
         self.fc = nn.Linear(self.atten_dim * self.head_num, model_dim, bias=True)
         self.dropout = nn.Dropout(dropout)
         self.norm = nn.LayerNorm(model_dim)
         
     def forward(self, Q, K, V, Ph_high, Ph_low):
-        """
-        Forward pass for routing attention
-        """
         residual = Q.clone()
         batch_size, seq_len = Q.size(0), Q.size(1)
         
@@ -196,29 +281,21 @@ class RoutingAttention(nn.Module):
         K = self.W_K(K).view(batch_size, seq_len, self.head_num, self.atten_dim)
         V = self.W_V(V).view(batch_size, seq_len, self.head_num, self.atten_dim)
         
-        # Reshape physical features to match sequence length
+        # Reshape physical features if needed
         if Ph_high.size(1) != seq_len:
-            # Reshape physical features to match batch_size and seq_len
-            Ph_high = Ph_high.view(batch_size, -1, self.model_dim)
-            # Either truncate or pad to match seq_len
-            if Ph_high.size(1) > seq_len:
-                Ph_high = Ph_high[:, :seq_len, :]
-            elif Ph_high.size(1) < seq_len:
-                padding = torch.zeros(batch_size, seq_len - Ph_high.size(1), self.model_dim, device=Ph_high.device)
-                Ph_high = torch.cat([Ph_high, padding], dim=1)
+            Ph_high = self._reshape_feature(Ph_high, batch_size, seq_len)
         
         if Ph_low.size(1) != seq_len:
-            # Same for Ph_low
-            Ph_low = Ph_low.view(batch_size, -1, self.model_dim)
-            if Ph_low.size(1) > seq_len:
-                Ph_low = Ph_low[:, :seq_len, :]
-            elif Ph_low.size(1) < seq_len:
-                padding = torch.zeros(batch_size, seq_len - Ph_low.size(1), self.model_dim, device=Ph_low.device)
-                Ph_low = torch.cat([Ph_low, padding], dim=1)
+            Ph_low = self._reshape_feature(Ph_low, batch_size, seq_len)
         
         # Project physical features
         Ph_high = self.W_Ph_high(Ph_high).view(batch_size, seq_len, self.head_num, self.atten_dim)
         Ph_low = self.W_Ph_low(Ph_low).view(batch_size, seq_len, self.head_num, self.atten_dim)
+        
+        # Cross-attention: data -> physical features
+        Q_cross = self.W_Cross_Q(Q.view(batch_size, seq_len, -1)).view(batch_size, seq_len, self.head_num, self.atten_dim)
+        K_high = self.W_Cross_K(Ph_high.view(batch_size, seq_len, -1)).view(batch_size, seq_len, self.head_num, self.atten_dim)
+        K_low = self.W_Cross_K(Ph_low.view(batch_size, seq_len, -1)).view(batch_size, seq_len, self.head_num, self.atten_dim)
         
         # Transpose for attention calculation [batch_size, head_num, seq_len, atten_dim]
         Q = Q.permute(0, 2, 1, 3)
@@ -226,21 +303,42 @@ class RoutingAttention(nn.Module):
         V = V.permute(0, 2, 1, 3)
         Ph_high = Ph_high.permute(0, 2, 1, 3)
         Ph_low = Ph_low.permute(0, 2, 1, 3)
+        Q_cross = Q_cross.permute(0, 2, 1, 3)
+        K_high = K_high.permute(0, 2, 1, 3)
+        K_low = K_low.permute(0, 2, 1, 3)
         
-        # Calculate attention scores
-        scores_data = torch.matmul(Q, K.transpose(-1, -2)) / np.sqrt(self.atten_dim)
-        scores_high = torch.matmul(Q, Ph_high.transpose(-1, -2)) / np.sqrt(self.atten_dim)
-        scores_low = torch.matmul(Q, Ph_low.transpose(-1, -2)) / np.sqrt(self.atten_dim)
+        # Calculate attention scores with scaling
+        scale_factor = float(self.atten_dim) ** -0.5
+        scores_data = torch.matmul(Q, K.transpose(-1, -2)) * scale_factor
+        scores_high = torch.matmul(Q, Ph_high.transpose(-1, -2)) * scale_factor
+        scores_low = torch.matmul(Q, Ph_low.transpose(-1, -2)) * scale_factor
         
-        # Combine scores with proper weighting using sigmoid gates
-        gate_high = torch.sigmoid(scores_high.mean(dim=-1, keepdim=True))
-        gate_low = torch.sigmoid(scores_low.mean(dim=-1, keepdim=True))
+        # Cross-attention scores
+        cross_high = torch.matmul(Q_cross, K_high.transpose(-1, -2)) * scale_factor
+        cross_low = torch.matmul(Q_cross, K_low.transpose(-1, -2)) * scale_factor
         
-        # Combined attention
-        attn = F.softmax(scores_data + gate_high * scores_high + gate_low * scores_low, dim=-1)
+        # Dynamic frequency-based gates
+        gate_high = torch.sigmoid(self.route_high * scores_high.detach())
+        gate_low = torch.sigmoid(self.route_low * scores_low.detach())
+        
+        # Cross-attention gates
+        cross_gate_high = torch.sigmoid(cross_high.mean(dim=-1, keepdim=True))
+        cross_gate_low = torch.sigmoid(cross_low.mean(dim=-1, keepdim=True))
+        
+        # Combined attention with layered frequency-based routing
+        combined_scores = scores_data + \
+                          gate_high * scores_high + \
+                          gate_low * scores_low + \
+                          cross_gate_high * cross_high + \
+                          cross_gate_low * cross_low
+        
+        # Apply softmax to get attention weights
+        attn = F.softmax(combined_scores, dim=-1)
+        
+        # Apply attention weights to value vectors
         context = torch.matmul(attn, V)
         
-        # Transpose back and reshape [batch_size, seq_len, head_num*atten_dim]
+        # Transpose back and reshape
         context = context.permute(0, 2, 1, 3).contiguous().view(batch_size, seq_len, -1)
         
         # Final projection
@@ -250,6 +348,17 @@ class RoutingAttention(nn.Module):
             return self.norm(output + residual)
         else:
             return self.norm(output)
+            
+    def _reshape_feature(self, feature, batch_size, seq_len):
+        feature = feature.view(batch_size, -1, self.model_dim)
+        
+        if feature.size(1) > seq_len:
+            feature = feature[:, :seq_len, :]
+        elif feature.size(1) < seq_len:
+            padding = torch.zeros(batch_size, seq_len - feature.size(1), self.model_dim, device=feature.device)
+            feature = torch.cat([feature, padding], dim=1)
+            
+        return feature
 
 
 class PhysicalGuidedBlock(nn.Module):
@@ -302,12 +411,12 @@ class PhysicallyGuidedDiffusion(nn.Module):
     Physically-guided diffusion model for time series anomaly detection
     """
     def __init__(self, time_steps=1000, beta_start=0.0001, beta_end=0.02, 
-                 window_size=64, model_dim=512, ff_dim=2048, atten_dim=64,
-                 feature_num=8, time_num=5, block_num=2, head_num=8,
-                 dropout=0.1, device=None, d=30, t=500, mafd_components=8):
+                window_size=64, model_dim=512, ff_dim=2048, atten_dim=64,
+                feature_num=8, time_num=5, block_num=2, head_num=8,
+                dropout=0.1, device=None, d=30, t=500, mafd_components=8):
         super(PhysicallyGuidedDiffusion, self).__init__()
         
-        # Set device
+        # Device setup
         if device is None:
             self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         else:
@@ -323,6 +432,13 @@ class PhysicallyGuidedDiffusion(nn.Module):
         # Initialize feature extractor
         self.feature_extractor = PhysicalFeatureExtractor(
             n_components=mafd_components, 
+            device=self.device
+        )
+        
+        self.freq_memory = FrequencyMemoryBank(
+            max_size=2000,
+            feature_dim=feature_num,
+            seq_len=window_size,
             device=self.device
         )
         
@@ -431,25 +547,6 @@ class PhysicallyGuidedDiffusion(nn.Module):
         return ph_high, ph_low
         
     def forward(self, data, time, p=0):
-        """
-        Forward pass
-        
-        Parameters:
-        -----------
-        data : torch.Tensor
-            Input data of shape (batch_size, window_size, feature_num)
-        time : torch.Tensor
-            Time features of shape (batch_size, window_size, time_num)
-        p : float
-            Disturbance magnitude for training (default: 0)
-            
-        Returns:
-        --------
-        Tuple:
-            recon: Reconstructed data
-            score: Anomaly scores
-            complexity: Signal complexity
-        """
         batch_size, window_size, feature_num = data.shape
         
         if p > 0:
@@ -460,26 +557,37 @@ class PhysicallyGuidedDiffusion(nn.Module):
             data_disturbed = data
             disturb = 0
         
-        # batch_idx = torch.randint(0, batch_size, (1,)).item()
-        # sample_data = data_disturbed[batch_idx:batch_idx+1]
-        sample_data = data_disturbed[torch.randperm(batch_size)[:1]]
+        subset_size = min(batch_size, 4)
+        subset_indices = torch.randperm(batch_size)[:subset_size]
+        subset_data = data_disturbed[subset_indices]
         
         try:
-            ph_high, ph_low, complexity = self.feature_extractor(sample_data)
-
-            if len(ph_high.shape) == 2: 
-                ph_high = ph_high.unsqueeze(0) 
-            if len(ph_low.shape) == 2: 
-                ph_low = ph_low.unsqueeze(0)
+            ph_high_subset, ph_low_subset, complexity = self.feature_extractor(subset_data)
+            
+            self.freq_memory.update(ph_high_subset, ph_low_subset, complexity)
+            
+            ph_high, ph_low, complexity = self.freq_memory.sample(batch_size)
+            
+            if ph_high is None:
+                if len(ph_high_subset.shape) == 2: 
+                    ph_high_subset = ph_high_subset.unsqueeze(0)
+                if len(ph_low_subset.shape) == 2: 
+                    ph_low_subset = ph_low_subset.unsqueeze(0)
+                    
+                if ph_high_subset.shape[0] == 1 and batch_size > 1:
+                    ph_high = ph_high_subset.expand(batch_size, -1, -1)
+                else:
+                    ph_high = ph_high_subset
                 
-            if ph_high.shape[0] == 1 and batch_size > 1:
-                ph_high = ph_high.expand(batch_size, -1, -1)
-            if ph_low.shape[0] == 1 and batch_size > 1:
-                ph_low = ph_low.expand(batch_size, -1, -1)
+                if ph_low_subset.shape[0] == 1 and batch_size > 1:
+                    ph_low = ph_low_subset.expand(batch_size, -1, -1)
+                else:
+                    ph_low = ph_low_subset
+
         except Exception as e:
             print(f"Feature extraction failed: {str(e)}")
-            ph_high = torch.zeros((batch_size, 1, window_size), device=self.device)
-            ph_low = torch.zeros((batch_size, 1, window_size), device=self.device)
+            ph_high = torch.zeros((batch_size, feature_num, window_size), device=self.device)
+            ph_low = torch.zeros((batch_size, feature_num, window_size), device=self.device)
             complexity = 0.5
         
         if ph_high.dim() > 3:
@@ -494,7 +602,7 @@ class PhysicallyGuidedDiffusion(nn.Module):
         sample_noise = torch.randn_like(data_disturbed)
         
         try:
-            noise_data = self.diffusion.q_sample(data_disturbed, ph_low, bt, sample_noise)
+            noise_data = self.diffusion.q_sample(data_disturbed, ph_low, bt, sample_noise, high_freq=ph_high)
         except Exception as e:
             print(f"Diffusion sampling failed: {str(e)}")
             noise_data = data_disturbed
@@ -515,47 +623,23 @@ class PhysicallyGuidedDiffusion(nn.Module):
         return recon, score, complexity
         
     def compute_loss(self, data, time, stable=None, label=None, p=0, lambda_aspe=0.1):
-        """
-        Compute training loss
-        
-        Parameters:
-        -----------
-        data : torch.Tensor
-            Input data
-        time : torch.Tensor
-            Time features
-        stable : torch.Tensor
-            Stable component (if available)
-        label : torch.Tensor
-            Ground truth labels (if available)
-        p : float
-            Disturbance magnitude
-        lambda_aspe : float
-            Weight for ASPE loss term
-            
-        Returns:
-        --------
-        Dict: Loss components
-        """
-        # Forward pass
         recon, score, complexity = self.forward(data, time, p)
         
-        # Reconstruction loss
         recon_loss = F.mse_loss(recon, data)
         
-        # ASPE regularization loss
         aspe_loss = complexity
         
-        # Anomaly detection loss if labels available
         if label is not None:
-            # Convert scores to binary predictions
-            pred = (score > 0.5).float()
-            # Compute BCE loss
-            detection_loss = F.binary_cross_entropy_with_logits(score, label)
+            pred = torch.sigmoid(score)
+            gamma = 2.0
+            alpha = 0.25
+            pt = label * pred + (1 - label) * (1 - pred)
+            focal_weight = alpha * torch.pow(1 - pt, gamma)
+            detection_loss = -torch.mean(focal_weight * (label * torch.log(pred + 1e-10) + 
+                                                    (1 - label) * torch.log(1 - pred + 1e-10)))
         else:
             detection_loss = torch.tensor(0.0, device=self.device)
             
-        # Combine losses
         total_loss = recon_loss + lambda_aspe * aspe_loss
         if label is not None:
             total_loss += detection_loss
@@ -569,7 +653,7 @@ class PhysicallyGuidedDiffusion(nn.Module):
         
     def detect_anomalies(self, data, time, threshold=None):
         """
-        Detect anomalies in the data
+        Detect anomalies in the data with improved scoring
         
         Parameters:
         -----------
@@ -585,27 +669,80 @@ class PhysicallyGuidedDiffusion(nn.Module):
         Dict: Anomaly detection results
         """
         with torch.no_grad():
-            recon, score, complexity = self.forward(data, time, p=0)
+            # Generate high and low frequency features
+            ph_high, ph_low, complexity = self.feature_extractor(data)
             
-            recon_error = F.mse_loss(recon, data, reduction='none')
-            recon_error = recon_error.mean(dim=2)
+            # Forward pass
+            recon, score, _ = self.forward(data, time, p=0)
             
+            # Calculate reconstruction error with feature-wise weighting
+            recon_error_raw = torch.pow(recon - data, 2)
+            
+            # Use high frequency components to weight the error - high frequency areas get more attention
+            high_freq_weight = torch.ones_like(data)
+            if ph_high.dim() > 1:
+                high_freq_magnitude = torch.abs(ph_high)
+                if high_freq_magnitude.shape[-1] == data.shape[1]:
+                    # Normalize to get weights between 1.0 and 2.0
+                    high_freq_weight = 1.0 + torch.nn.functional.normalize(high_freq_magnitude.transpose(1, 2), dim=2) 
+            
+            # Apply weights to reconstruction error
+            weighted_recon_error = recon_error_raw * high_freq_weight
+            recon_error = weighted_recon_error.mean(dim=2)
+            
+            # Model predicted anomaly score
             anomaly_score = score.squeeze(-1)
             
-            combined_score = anomaly_score + complexity * recon_error
+            # Adaptive weighting between reconstruction error and model score
+            recon_weight = torch.sigmoid(complexity * torch.ones_like(anomaly_score) * 2.0)
+            score_weight = 1.0 - recon_weight
             
+            # Combine scores
+            combined_score = score_weight * anomaly_score + recon_weight * recon_error
+            
+            # Calculate robust threshold if not provided
             if threshold is None:
-                mean = combined_score.mean()
-                std = combined_score.std()
-                threshold = mean + 3 * std
+                # Sort scores and use a more robust approach
+                flat_scores = combined_score.view(-1).detach().cpu().numpy()
+                sorted_scores = np.sort(flat_scores)
                 
+                # Get percentiles for more robust threshold determination
+                num_scores = len(sorted_scores)
+                q50_idx = int(0.50 * num_scores)
+                q95_idx = int(0.95 * num_scores)
+                q99_idx = int(0.99 * num_scores)
+                
+                q50 = sorted_scores[q50_idx]
+                q95 = sorted_scores[q95_idx]
+                q99 = sorted_scores[q99_idx]
+                
+                # Adaptive threshold based on distribution characteristics
+                if q99 - q95 > 3 * (q95 - q50):  # Heavy-tailed distribution
+                    threshold = q95 + (q99 - q95) * 0.5
+                else:  # More normal distribution
+                    threshold = q50 + 2.5 * (q95 - q50)
+            
+            # Generate predictions
             predictions = (combined_score > threshold).float()
             
+            # Post-process predictions - remove isolated anomalies (likely false positives)
+            if predictions.dim() > 1 and predictions.shape[1] > 1:
+                kernel_size = min(5, predictions.shape[1])
+                if kernel_size % 2 == 0:
+                    kernel_size += 1  # Ensure odd kernel size
+                    
+                # Simple smoothing with sliding window
+                padded = torch.nn.functional.pad(predictions, (kernel_size//2, kernel_size//2), mode='replicate')
+                smoothed = torch.nn.functional.avg_pool1d(padded.transpose(1, 2), kernel_size=kernel_size, stride=1)
+                smoothed = (smoothed > 0.4).float()  # Threshold for smoothed values
+                predictions = smoothed.transpose(1, 2)
+            
             return {
-                'anomaly_score': combined_score,
-                'predictions': predictions,
+                'anomaly_score': combined_score.detach().cpu(),
+                'predictions': predictions.detach().cpu(),
                 'threshold': threshold,
-                'reconstruction': recon,
-                'reconstruction_error': recon_error,
+                'reconstruction': recon.detach().cpu(),
+                'reconstruction_error': recon_error.detach().cpu(),
+                'model_score': anomaly_score.detach().cpu(),
                 'complexity': complexity
             }

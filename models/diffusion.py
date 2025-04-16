@@ -1,8 +1,8 @@
 import torch
 
-
 class Diffusion:
     def __init__(self, time_steps=1000, beta_start=0.0001, beta_end=0.02, device='cpu'):
+        self.device = torch.device(device)
         self.betas = torch.linspace(beta_start, beta_end, time_steps).float().to(device)
 
         self.alphas = 1. - self.betas
@@ -17,29 +17,23 @@ class Diffusion:
         out = torch.gather(data, -1, batch_t)
         return out.reshape(batch_size, *((1,) * (len(shape) - 1)))
 
-    def q_sample(self, x_start, trend, batch_t, noise):
-        """
-        Apply the forward diffusion process
-        """
+    def q_sample(self, x_start, trend, batch_t, noise, high_freq=None):
         batch_size, seq_len, feature_dim = x_start.shape
         
         # Standardize trend tensor format
-        if trend.ndim == 2:  # [channels, timesteps]
+        if trend.ndim == 2:
             trend = trend.unsqueeze(0).expand(batch_size, -1, -1)
         
         if trend.ndim == 3:
-            # Adjust batch dimension if needed
             if trend.shape[0] != batch_size:
                 trend = trend[:1].expand(batch_size, -1, -1)
             
-            # Adjust feature dimension if needed
             if trend.shape[1] != feature_dim:
                 if trend.shape[1] == 1:
                     trend = trend.expand(-1, feature_dim, -1)
                 else:
                     trend = trend[:, :1].expand(-1, feature_dim, -1)
             
-            # Adjust sequence length if needed
             if trend.shape[2] != seq_len:
                 trend = torch.nn.functional.interpolate(
                     trend, size=seq_len, mode='linear'
@@ -51,23 +45,53 @@ class Diffusion:
         else:
             trend_reshaped = trend.transpose(1, 2)
         
-        # Verify dimensions
-        assert trend_reshaped.shape[0] == batch_size, f"Batch size mismatch: trend_reshaped {trend_reshaped.shape[0]} vs required {batch_size}"
-        assert trend_reshaped.shape[1] == seq_len, f"Sequence length mismatch: trend_reshaped {trend_reshaped.shape[1]} vs required {seq_len}"
-        assert trend_reshaped.shape[2] == feature_dim, f"Feature dimension mismatch: trend_reshaped {trend_reshaped.shape[2]} vs required {feature_dim}"
+        # Process high frequency tensor if provided
+        if high_freq is not None:
+            if high_freq.ndim == 2:
+                high_freq = high_freq.unsqueeze(0).expand(batch_size, -1, -1)
+            
+            if high_freq.ndim == 3:
+                if high_freq.shape[0] != batch_size:
+                    high_freq = high_freq[:1].expand(batch_size, -1, -1)
+                
+                if high_freq.shape[1] != feature_dim:
+                    if high_freq.shape[1] == 1:
+                        high_freq = high_freq.expand(-1, feature_dim, -1)
+                    else:
+                        high_freq = high_freq[:, :1].expand(-1, feature_dim, -1)
+                
+                if high_freq.shape[2] != seq_len:
+                    high_freq = torch.nn.functional.interpolate(
+                        high_freq, size=seq_len, mode='linear'
+                    )
+                    
+            # Reshape high_freq to match data format if needed
+            if high_freq.shape[1] == seq_len and high_freq.shape[2] == feature_dim:
+                high_freq_reshaped = high_freq
+            else:
+                high_freq_reshaped = high_freq.transpose(1, 2)
+        else:
+            high_freq_reshaped = torch.zeros_like(trend_reshaped)
         
         # Extract diffusion coefficients
         sqrt_alphas_cumprod_t = self._extract(self.sqrt_alphas_cumprod, batch_t, x_start.shape)
         sqrt_one_minus_alphas_cumprod_t = self._extract(self.sqrt_one_minus_alphas_cumprod, batch_t, x_start.shape)
         
-        # Dynamic trend influence - stronger at early steps, weaker at later steps
-        trend_influence = torch.sigmoid(10 * (1 - sqrt_alphas_cumprod_t))
+        # Dynamic frequency-based diffusion
+        diffusion_progress = sqrt_one_minus_alphas_cumprod_t
         
-        # Apply enhanced diffusion with dynamic trend influence
+        # Frequency-adaptive influence factors
+        low_freq_ratio = torch.sigmoid(5 * (1 - diffusion_progress))
+        high_freq_ratio = torch.sigmoid(5 * diffusion_progress)
+        
+        # Balance factor to weight noise vs frequency guided info
+        noise_weight = 0.7
+        
+        # Enhanced diffusion with frequency guided information
         x_noisy = sqrt_alphas_cumprod_t * x_start + \
-                sqrt_one_minus_alphas_cumprod_t * (
-                    (1 - trend_influence) * noise + 
-                    trend_influence * trend_reshaped
-                )
+                  sqrt_one_minus_alphas_cumprod_t * (
+                      noise_weight * noise + 
+                      (1 - noise_weight) * (low_freq_ratio * trend_reshaped + high_freq_ratio * high_freq_reshaped)
+                  )
 
         return x_noisy

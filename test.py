@@ -36,7 +36,7 @@ if __name__ == '__main__':
     parser.add_argument('--t', type=int, default=500, help='noise step for diffusion')
     
     # MAFD parameters
-    parser.add_argument('--mafd_components', type=int, default=8, help='number of MAFD components')
+    parser.add_argument('--mafd_components', type=int, default=4, help='number of MAFD components')
     
     # Testing parameters
     parser.add_argument('--batch_size', type=int, default=8, help='batch size')

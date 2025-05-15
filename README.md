@@ -4,7 +4,7 @@
 ![PyTorch](https://img.shields.io/badge/PyTorch-2.1%2B-orange)
 ![License](https://img.shields.io/badge/License-MIT-green)
 
-A physics-informed deep learning framework for detecting anomalies in multivariate time series data. This approach integrates wavelet transforms, Hilbert-Huang Transform (HHT), and diffusion models to capture complex temporal patterns and identify anomalies effectively.
+Unsupervised anomaly detection for multivariate time series remains challenging due to complex nonstationary dynamics, high false positive rates, and limited interpretability. To address these issues, PhysDiff employs a two-stage process: physics-guided decomposition and diffusion-based reconstruction. Signal decomposition is necessary to disentangle overlapping dynamics by isolating high frequency oscillations and low frequency trends, which reduces interference and provides meaningful physical priors. Reconstruction through conditional diffusion modeling then captures deviations from learned normal behavior, making anomalies more distinguishable. First, we introduce an amplitude-sensitive permutation entropy criterion to adaptively determine the optimal decomposition depth, extracting frequency components without manual tuning. These components serve as explicit physical constraints. Second, we design a dual path conditional diffusion network that integrates decomposed signals and dynamically regulates denoising via a novel time frequency energy routing mechanism. By weighting reconstruction errors across frequency bands, our method improves anomaly localization and enhances interpretability. Extensive experiments on five benchmark datasets and two NeurIPS-TS scenarios demonstrate that PhysDiff outperforms 18 state-of-the-art baselines, with average F1-score improvements on both standard and challenging datasets. These results validate the necessity of combining principled signal decomposition with diffusion-based reconstruction for robust, interpretable anomaly detection in complex dynamic systems.
 
 ## ✨ Features
 
@@ -23,21 +23,6 @@ A physics-informed deep learning framework for detecting anomalies in multivaria
 - SciPy
 - Scikit-learn
 - Matplotlib
-
-## 🚀 Installation
-
-```bash
-# Clone the repository
-git clone https://github.com/dddlli/PhysDiff.git
-cd PhysDiff
-
-# Create a virtual environment
-python -m venv env
-source env/bin/activate  # On Windows: env\Scripts\activate
-
-# Install dependencies
-pip install -r requirements.txt
-```
 
 ## 📊 Data Preparation
 
@@ -107,19 +92,11 @@ python main.py \
 
 The PhysDiff model consists of three main components:
 
-1. **Physics Encoder**: Extracts physics-guided features from time series using:
-   - Wavelet transform for multi-scale analysis
-   - Hilbert-Huang Transform for non-stationary pattern detection
-   - Amplitude-Aware Permutation Entropy for complexity measurement
+1. **Physics-Guided Feature Extraction**:  We extract interpretable features via adaptive multi-scale signal decomposition, capturing both transient dynamics and long-term trends.
 
-2. **Diffusion Model**: A denoising diffusion probabilistic model conditioned on physics features:
-   - Forward process: Gradually adds noise to time series data
-   - Reverse process: Learns to reconstruct normal patterns from noisy data
+2. **Physically-Informed Diffusion Model**: We employ a conditional generative diffusion process incorporating these physical priors to robustly learn the distribution of normal patterns
 
-3. **Anomaly Detection**: Identifies anomalies using reconstruction error:
-   - Normal data: Low reconstruction error
-   - Anomalies: High reconstruction error
-   - SPOT algorithm: Adaptive threshold setting
+3. **Anomaly Detection Scoring Module**: where anomalies are detected by contrasting reconstructed signals against observed data, with mechanisms sensitive to both point anomalies and sequence-level pattern deviations.
 
 ## 📂 Project Structure
 
@@ -165,8 +142,6 @@ F1-Score: 0.8998
 
 If the `--visualize` flag is enabled, visualizations will be saved to the `checkpoint/` directory:
 
-![Anomaly Visualization](./assets/anomaly_visualization.png)
-
 
 ## 📜 License
 
@@ -176,19 +151,18 @@ This project is licensed under the MIT License - see the LICENSE file for detail
 
 - This work builds upon advances in diffusion models for time series
 - The SPOT algorithm implementation is adapted from the anomaly detection literature
-- The Hilbert-Huang Transform implementation is based on the PyTorch HHT package
 
 ## 📝 Citation
 
 If you use this code in your research, please cite:
 
 ```bibtex
-@misc{pgtsad2023,
-  author = {Your Name},
+@misc{physdiff2025,
+  author = {Anonymous Author(s)},
   title = {PhysDiff: A Physically-Guided Diffusion Model for Multivariate Time Series Anomaly Detection},
   year = {2025},
   publisher = {GitHub},
-  howpublished = {\url{https://github.com/dddlli/PhysDiff.git}}
+  howpublished = {\url{https://anonymous.4open.science/r/PhysDiff-4726}}
 }
 ```
 

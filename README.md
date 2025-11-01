@@ -4,15 +4,13 @@
 ![PyTorch](https://img.shields.io/badge/PyTorch-2.1%2B-orange)
 ![License](https://img.shields.io/badge/License-MIT-green)
 
-Unsupervised anomaly detection for multivariate time series remains challenging due to complex nonstationary dynamics, high false positive rates, and limited interpretability. To address these issues, PhysDiff employs a two-stage process: physics-guided decomposition and diffusion-based reconstruction. Signal decomposition is necessary to disentangle overlapping dynamics by isolating high frequency oscillations and low frequency trends, which reduces interference and provides meaningful physical priors. Reconstruction through conditional diffusion modeling then captures deviations from learned normal behavior, making anomalies more distinguishable. First, we introduce an amplitude-sensitive permutation entropy criterion to adaptively determine the optimal decomposition depth, extracting frequency components without manual tuning. These components serve as explicit physical constraints. Second, we design a dual path conditional diffusion network that integrates decomposed signals and dynamically regulates denoising via a novel time frequency energy routing mechanism. By weighting reconstruction errors across frequency bands, our method improves anomaly localization and enhances interpretability. Extensive experiments on five benchmark datasets and two NeurIPS-TS scenarios demonstrate that PhysDiff outperforms 18 state-of-the-art baselines, with average F1-score improvements on both standard and challenging datasets. These results validate the necessity of combining principled signal decomposition with diffusion-based reconstruction for robust, interpretable anomaly detection in complex dynamic systems.
+Unsupervised anomaly detection of multivariate time series remains challenging in complex non-stationary dynamics, due to the high false-positive rates and limited interpretability. We propose PhysDiff, combining physics-guided decomposition with diffusion-based reconstruction, to address these issues. The physics-guided signal decomposition is introduced to disentangle overlapping dynamics by isolating high frequency oscillations and low frequency trends, which can reduce interference and provide meaningful physical priors. The reconstruction through conditional diffusion modeling captures deviations from learned normal behavior, making anomalies more distinguishable. Notably, PhysDiff introduces an amplitude-sensitive permutation entropy criterion to adaptively determine the optimal decomposition depth, and automatically extract adaptive frequency components used as explicit physics-based constraints for the diffusion process. Furthermore, the proposed conditional diffusion network employs a dual-path conditioning mechanism that integrates high-frequency and low-frequency physical priors, dynamically regulating the denoising process via a novel time frequency energy routing mechanism. By weighting reconstruction errors across frequency bands, our method improves anomaly localization and enhances interpretability. Extensive experiments on five benchmark datasets and two NeurIPS-TS scenarios demonstrate that PhysDiff outperforms 18 state-of-the-art baselines, with average F1 score improvements on both standard and challenging datasets. Experimental results validate the advantages of combining principled signal decomposition with diffusion-based reconstruction for robust, interpretable anomaly detection in complex dynamic systems.
 
 ## ✨ Features
 
-- **Physics-Guided Feature Extraction**: Extracts high and low-frequency components using Multi-channel Adaptive Fourier Decomposition (MAFD)
-- **Complexity Measurement**: Amplitude-Sensitive Permutation Entropy (ASPE) for measuring time series complexity
-- **Diffusion-Based Detection**: Uses physically-constrained diffusion models with Langevin dynamics for anomaly detection
-- **Transformer Architecture**: Incorporates spatial-temporal transformer blocks with routing attention
-- **Visualization Tools**: Comprehensive visualization for model understanding and anomaly interpretation
+- We propose a physically-guided diffusion model that effectively addresses non-stationarity challenges.
+- We introduce an amplitude-sensitive permutation entropy guided decomposition mechanism that dynamically determines optimal decomposition depth.
+- We develop a dual-path conditional diffusion framework with a novel frequency-based routing attention mechanism.
 
 ## 📋 Requirements
 
@@ -96,7 +94,7 @@ The PhysDiff model consists of three main components:
 
 2. **Physically-Informed Diffusion Model**: We employ a conditional generative diffusion process incorporating these physical priors to robustly learn the distribution of normal patterns
 
-3. **Anomaly Detection Scoring Module**: where anomalies are detected by contrasting reconstructed signals against observed data, with mechanisms sensitive to both point anomalies and sequence-level pattern deviations.
+3. **Physics-Driven Anomaly Detection**: where anomalies are detected by contrasting reconstructed signals against observed data, with mechanisms sensitive to both point anomalies and sequence-level pattern deviations.
 
 ## 📂 Project Structure
 

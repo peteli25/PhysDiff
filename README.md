@@ -1,9 +1,5 @@
 # PhysDiff: A Physically-Guided Diffusion Model for Multivariate Time Series Anomaly Detection
 
-![Python](https://img.shields.io/badge/Python-3.10%2B-blue)
-![PyTorch](https://img.shields.io/badge/PyTorch-2.1%2B-orange)
-![License](https://img.shields.io/badge/License-MIT-green)
-
 ---
 
 

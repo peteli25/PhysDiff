@@ -155,12 +155,17 @@ This project is licensed under the MIT License - see the LICENSE file for detail
 If you use this code in your research, please cite:
 
 ```bibtex
-@misc{physdiff2025,
-  author = {Anonymous Author(s)},
-  title = {PhysDiff: A Physically-Guided Diffusion Model for Multivariate Time Series Anomaly Detection},
-  year = {2025},
-  publisher = {GitHub},
-  howpublished = {\url{https://anonymous.4open.science/r/PhysDiff-4726}}
+@inproceedings{PhysDiff_2025,
+ author = {Li, Long and Zhang, Wencheng and Yuan, Shi and Guo, Hongle and Chen, Wanghu},
+ booktitle = {Advances in Neural Information Processing Systems},
+ doi = {10.52202/085713-3531},
+ editor = {D. Belgrave and C. Zhang and H. Lin and R. Pascanu and P. Koniusz and M. Ghassemi and N. Chen},
+ pages = {105720--105750},
+ publisher = {Curran Associates, Inc.},
+ title = {PhysDiff: A Physically-Guided Diffusion Model for Multivariate Time Series Anomaly Detection},
+ url = {https://proceedings.neurips.cc/paper_files/paper/2025/file/980ea04d23d1f6908964eba2a74afe45-Paper-Conference.pdf},
+ volume = {38, Main Conference},
+ year = {2025}
 }
 ```
 

@@ -4,6 +4,26 @@
 ![PyTorch](https://img.shields.io/badge/PyTorch-2.1%2B-orange)
 ![License](https://img.shields.io/badge/License-MIT-green)
 
+---
+
+
+<div align="center">
+
+<a href="https://github.com/peteli25">Long Li</a><sup>1,^</sup>, Wencheng Zhang<sup>1, ^</sup>, Shi Yuan<sup>1,^</sup>, Hongle Guo<sup>2</sup>, Wanghu Chen<sup>1,*</sup>
+
+<p>
+<sup>1</sup>College of Computer Science & Engineering, Northwest Normal University / Gansu, China
+
+<sup>2</sup>School of Management, Northwest Normal University / Gansu, China
+</p>
+
+**NeurIPS 2025**
+
+[[Paper latest](https://openreview.net/pdf?id=ElTbpJp7b9)]
+</div>
+
+---
+
 <p style="text-align: justify;">Unsupervised anomaly detection of multivariate time series remains challenging in complex non-stationary dynamics, due to the high false-positive rates and limited interpretability. We propose PhysDiff, combining physics-guided decomposition with diffusion-based reconstruction, to address these issues. The physics-guided signal decomposition is introduced to disentangle overlapping dynamics by isolating high frequency oscillations and low frequency trends, which can reduce interference and provide meaningful physical priors. The reconstruction through conditional diffusion modeling captures deviations from learned normal behavior, making anomalies more distinguishable. Notably, PhysDiff introduces an amplitude-sensitive permutation entropy criterion to adaptively determine the optimal decomposition depth, and automatically extract adaptive frequency components used as explicit physics-based constraints for the diffusion process. Furthermore, the proposed conditional diffusion network employs a dual-path conditioning mechanism that integrates high-frequency and low-frequency physical priors, dynamically regulating the denoising process via a novel time frequency energy routing mechanism. By weighting reconstruction errors across frequency bands, our method improves anomaly localization and enhances interpretability. Extensive experiments on five benchmark datasets and two NeurIPS-TS scenarios demonstrate that PhysDiff outperforms 18 state-of-the-art baselines, with average F1 score improvements on both standard and challenging datasets. Experimental results validate the advantages of combining principled signal decomposition with diffusion-based reconstruction for robust, interpretable anomaly detection in complex dynamic systems.</p>
 
 ## ✨ Features
